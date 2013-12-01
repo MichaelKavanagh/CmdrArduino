@@ -42,43 +42,37 @@ volatile uint8_t current_bit_counter = 14; //init to 14 1's for the preamble
     Because '0's are stretched to provide DC power to non-DCC locos, we need two zero counters,
      one for the top half, and one for the bottom half.
 
-   Here is how to calculate the timer1 counter values (from ATMega168 datasheet, 15.9.2):
+   Here is how to calculate the timer1 counter values (from ATtiny24/44/84 datasheet, 12.8.2):
  f_{OC1A} = \frac{f_{clk_I/O}}{2*N*(1+OCR1A)})
- where N = prescalar, and OCR1A is the TOP we need to calculate.
+ where N = prescaler, and OCR1A is the TOP we need to calculate.
  We know the desired half period for each case, 58us and >100us.
  So:
  for ones:
- 58us = (8*(1+OCR1A)) / (16MHz)
- 58us * 16MHz = 8*(1+OCR1A)
- 58us * 2MHz = 1+OCR1A
- OCR1A = 115
+ 58us = (8*(1+OCR1A)) / (8MHz)
+ 58us = 1+OCR1A
+ OCR1A = 57
 
  for zeros:
- 100us * 2MHz = 1+OCR1A
- OCR1A = 199
+ 100us = 1+OCR1A
+ OCR1A = 99
  
  Thus, we also know that the valid range for stretched-zero operation is something like this:
- 9900us = (8*(1+OCR1A)) / (16MHz)
- 9900us * 2MHz = 1+OCR1A
- OCR1A = 19799
+ 9900us = (8*(1+OCR1A)) / (8MHz)
+ 9900us = 1+OCR1A
+ OCR1A = 9899
  
 */
 
-uint16_t one_count=115; //58us
-uint16_t zero_high_count=199; //100us
-uint16_t zero_low_count=199; //100us
+uint16_t one_count=57; //58us
+uint16_t zero_high_count=99; //100us
+uint16_t zero_low_count=99; //100us
 
 /// Setup phase: configure and enable timer1 CTC interrupt, set OC1A and OC1B to toggle on CTC
 void setup_DCC_waveform_generator() {
   
  //Set the OC1A and OC1B pins (Timer1 output pins A and B) to output mode
- //On Arduino UNO, etc, OC1A is Port B/Pin 1 and OC1B Port B/Pin 2
- //On Arduino MEGA, etc, OC1A is or Port B/Pin 5 and OC1B Port B/Pin 6
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_AT90CAN128__) || defined(__AVR_AT90CAN64__) || defined(__AVR_AT90CAN32__)
-  DDRB |= (1<<DDB5) | (1<<DDB6);
-#else
-  DDRB |= (1<<DDB1) | (1<<DDB2);
-#endif
+ //On ATtiny84, OC1A is Port A/Pin 6 and OC1B Port A/Pin 5
+  DDRA |= (1<<DDA6) | (1<<DDA5);
 
   // Configure timer1 in CTC mode, for waveform generation, set to toggle OC1A, OC1B, at /8 prescalar, interupt at CTC
   TCCR1A = (0<<COM1A1) | (1<<COM1A0) | (0<<COM1B1) | (1<<COM1B0) | (0<<WGM11) | (0<<WGM10);
@@ -99,8 +93,9 @@ void DCC_waveform_generation_hasshin()
   TIMSK1 |= (1<<OCIE1A);
 }
 
+
 /// This is the Interrupt Service Routine (ISR) for Timer1 compare match.
-ISR(TIMER1_COMPA_vect)
+ISR(TIM1_COMPA_vect)
 {
   //in CTC mode, timer TCINT1 automatically resets to 0 when it matches OCR1A. Depending on the next bit to output,
   //we may have to alter the value in OCR1A, maybe.
@@ -108,14 +103,8 @@ ISR(TIMER1_COMPA_vect)
   
   //remember, anything we set for OCR1A takes effect IMMEDIATELY, so we are working within the cycle we are setting.
   //first, check to see if we're in the second half of a uint8_t; only act on the first half of a uint8_t
-  //On Arduino UNO, etc, OC1A is digital pin 9, or Port B/Pin 1
-  //On Arduino MEGA, etc, OC1A is digital pin 11, or Port B/Pin 5
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_AT90CAN128__) || defined(__AVR_AT90CAN64__) || defined(__AVR_AT90CAN32__)
-  if(PINB & (1<<PINB6)) //if the pin is low, we need to use a different zero counter to enable streched-zero DC operation
-#else
-  if(PINB & (1<<PINB1)) //if the pin is low, we need to use a different zero counter to enable streched-zero DC operation
-#endif
-
+  //On ATtiny84, OC1A is Port A/Pin 6
+  if(PINA & (1<<PINA6)) //if the pin is low, we need to use a different zero counter to enable streched-zero DC operation
   {
     if(OCR1A == zero_high_count) //if the pin is low and outputting a zero, we need to be using zero_low_count
       {
